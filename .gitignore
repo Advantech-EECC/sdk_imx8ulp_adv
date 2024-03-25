@@ -1,0 +1,9 @@
+application/armgcc/debug
+application/armgcc/*.map
+application/armgcc/*.bin
+application/armgcc/CMakeCache.txt
+application/armgcc/Makefile
+application/armgcc/custom*
+application/armgcc/cmake_install.cmake
+application/armgcc/build_log.txt
+application/armgcc/CMakeFiles
