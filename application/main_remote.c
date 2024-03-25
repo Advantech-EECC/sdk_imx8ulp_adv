@@ -47,6 +47,16 @@ static struct lpuart_io lpuart2;
 
 volatile bool trdc_set = false;
 
+static inline void RGPIO_WritePinNSE(RGPIO_Type *base, uint32_t pin)
+{
+    base->PCNS |= 1UL << pin;
+}
+
+static inline uint32_t RGPIO_ReadPinNSE(RGPIO_Type *base, uint32_t pin)
+{
+    return ((base->PCNS >> pin) & 0x1);
+}
+
 /* Globals */
 static char app_buf[512]; /* Each RPMSG buffer can carry less than 512 payload */
 
@@ -203,6 +213,41 @@ void lpuart2_task(void *param)
 
     while(!trdc_set) {
         SDK_DelayAtLeastUs(1000, SDK_DEVICE_MAXIMUM_CPU_CLOCK_FREQUENCY);
+    }
+
+    if (RGPIO_ReadPinNSE(GPIOA, 5) != 1 || \
+        RGPIO_ReadPinNSE(GPIOB, 0) != 1 || \
+        RGPIO_ReadPinNSE(GPIOB, 1) != 1 || \
+        RGPIO_ReadPinNSE(GPIOB, 6) != 1 || \
+        RGPIO_ReadPinNSE(GPIOC, 0) != 1 || \
+        RGPIO_ReadPinNSE(GPIOC, 1) != 1 || \
+        RGPIO_ReadPinNSE(GPIOC, 2) != 1 || \
+        RGPIO_ReadPinNSE(GPIOC, 3) != 1 || \
+        RGPIO_ReadPinNSE(GPIOC, 4) != 1 || \
+        RGPIO_ReadPinNSE(GPIOC, 12) != 1 || \
+        RGPIO_ReadPinNSE(GPIOC, 18) != 1 || \
+        RGPIO_ReadPinNSE(GPIOC, 19) != 1 || \
+        RGPIO_ReadPinNSE(GPIOC, 20) != 1 || \
+        RGPIO_ReadPinNSE(GPIOC, 21) != 1 || \
+        RGPIO_ReadPinNSE(GPIOC, 22) != 1 || \
+        RGPIO_ReadPinNSE(GPIOC, 23) != 1)
+    {
+        RGPIO_WritePinNSE(GPIOA, 5);
+        RGPIO_WritePinNSE(GPIOB, 0);
+        RGPIO_WritePinNSE(GPIOB, 1);
+        RGPIO_WritePinNSE(GPIOB, 6);
+        RGPIO_WritePinNSE(GPIOC, 0);
+        RGPIO_WritePinNSE(GPIOC, 1);
+        RGPIO_WritePinNSE(GPIOC, 2);
+        RGPIO_WritePinNSE(GPIOC, 3);
+        RGPIO_WritePinNSE(GPIOC, 4);
+        RGPIO_WritePinNSE(GPIOC, 12);
+        RGPIO_WritePinNSE(GPIOC, 18);
+        RGPIO_WritePinNSE(GPIOC, 19);
+        RGPIO_WritePinNSE(GPIOC, 20);
+        RGPIO_WritePinNSE(GPIOC, 21);
+        RGPIO_WritePinNSE(GPIOC, 22);
+        RGPIO_WritePinNSE(GPIOC, 23);
     }
 
     if(!init_lpuart(&lpuart2, LPUART2, 115200)) {

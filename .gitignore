@@ -1,4 +1,5 @@
 application/armgcc/debug
+application/armgcc/release
 application/armgcc/*.map
 application/armgcc/*.bin
 application/armgcc/CMakeCache.txt

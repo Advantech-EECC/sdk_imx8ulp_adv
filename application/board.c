@@ -605,6 +605,34 @@ void BOARD_SetTrdcGlobalConfig(void)
         }
 
         /* Special configurations for cortex-A35 */
+        /* non secure state can access GPIOA for cortex-A35 */
+        mbcBlockConfig.memoryAccessControlSelect = TRDC_MBC_ACCESS_CONTROL_POLICY_ALL_INDEX;
+        mbcBlockConfig.nseEnable                 = true; /* non secure state can access the block for cortex-A35 */
+        mbcBlockConfig.mbcIdx                    = 0U;   /* MBC0 */
+        mbcBlockConfig.domainIdx                 = 7U;   /* MBC0_DOM7 SRM:Master ID and Default DID Assignments */
+        mbcBlockConfig.slaveMemoryIdx		 = 3U;   /* 0: TCRAML, 1: TCRAMU, 2: SSRAM, 3: GPIOA/B/C & ISP-AP */
+        mbcBlockConfig.memoryBlockIdx            = 0U;   /* 0: GPIOA, 1:GPIOB, 2:GPIOC */
+        TRDC_MbcSetMemoryBlockConfig(TRDC, &mbcBlockConfig);
+
+        /* non secure state can access GPIOB for cortex-A35 */
+        mbcBlockConfig.memoryAccessControlSelect = TRDC_MBC_ACCESS_CONTROL_POLICY_ALL_INDEX;
+        mbcBlockConfig.nseEnable                 = true; /* non secure state can access the block for cortex-A35 */
+        mbcBlockConfig.mbcIdx                    = 0U;   /* MBC0 */
+        mbcBlockConfig.domainIdx                 = 7U;   /* MBC0_DOM7 SRM:Master ID and Default DID Assignments */
+        mbcBlockConfig.slaveMemoryIdx		 = 3U;   /* 0: TCRAML, 1: TCRAMU, 2: SSRAM, 3: GPIOA/B/C & ISP-AP */
+        mbcBlockConfig.memoryBlockIdx            = 1U; /* 0: GPIOA, 1:GPIOB, 2:GPIOC */
+        TRDC_MbcSetMemoryBlockConfig(TRDC, &mbcBlockConfig);
+
+        /* non secure state can access GPIOC for cortex-A35 */
+        mbcBlockConfig.memoryAccessControlSelect = TRDC_MBC_ACCESS_CONTROL_POLICY_ALL_INDEX;
+        mbcBlockConfig.nseEnable                 = true; /* non secure state can access the block for cortex-A35 */
+        mbcBlockConfig.mbcIdx                    = 0U;   /* MBC0 */
+        mbcBlockConfig.domainIdx                 = 7U;   /* MBC0_DOM7 SRM:Master ID and Default DID Assignments */
+        mbcBlockConfig.slaveMemoryIdx		 = 3U;   /* 0: TCRAML, 1: TCRAMU, 2: SSRAM, 3: GPIOA/B/C & ISP-AP */
+        mbcBlockConfig.memoryBlockIdx            = 2U;   /* 0: GPIOA, 1:GPIOB, 2:GPIOC */
+        TRDC_MbcSetMemoryBlockConfig(TRDC, &mbcBlockConfig);
+
+        /* Special configurations for cortex-A35 */
         /* non secure state can access 0x1fff8000(it is used for resource table of rpmsg) for cortex-A35 */
         mbcBlockConfig.memoryAccessControlSelect = TRDC_MBC_ACCESS_CONTROL_POLICY_ALL_INDEX;
         mbcBlockConfig.nseEnable                 = true; /* non secure state can access the block for cortex-A35 */
