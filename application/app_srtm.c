@@ -146,6 +146,8 @@ bool option_v_boot_flag          = false;
 static bool need_reset_peer_core = false;
 bool wake_acore_flag             = true;
 
+extern bool a35_ready;
+
 pca9460_buck3ctrl_t buck3_ctrl;
 pca9460_ldo1_cfg_t ldo1_cfg;
 
@@ -2130,6 +2132,8 @@ void CMC1_IRQHandler(void)
 
         /* hold A core for next reboot */
         MU_HoldOtherCoreReset(MU0_MUA);
+
+        a35_ready = true;
     }
 }
 
@@ -2168,6 +2172,7 @@ static srtm_status_t APP_SRTM_LfclEventHandler(
 
             if (support_dsl_for_apd != true)
             {
+                a35_ready = false;
                 AD_WillEnterMode = AD_PD;
                 PRINTF("\r\nAD will enter Power Down Mode\r\n");
             }

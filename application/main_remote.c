@@ -42,6 +42,7 @@ extern void app_destroy_task(void);
 #define LOCAL_EPT_ADDR (30)
 #endif
 
+volatile bool a35_ready = true;
 static bool uart_ready = false;
 static struct lpuart_io lpuart2;
 
@@ -139,8 +140,10 @@ void app_task(void *param)
 
     for (;;)
     {
-        result =
-            rpmsg_queue_recv_nocopy(my_rpmsg, my_queue, (uint32_t *)&remote_addr, (char **)&rx_buf, &len, RPMSG_TIMEOUT);
+        if(a35_ready)
+            result = rpmsg_queue_recv_nocopy(my_rpmsg, my_queue, (uint32_t *)&remote_addr, (char **)&rx_buf, &len, RPMSG_TIMEOUT);
+        else
+            result = RL_ERR_NO_BUFF;
 
         if(result == RL_SUCCESS) {
             assert(len < sizeof(app_buf));
@@ -169,7 +172,10 @@ void app_task(void *param)
             size_t read_count =  read_lpuart(&lpuart2, app_buf, sizeof(app_buf));
 
             if(read_count) {
-                tx_buf = rpmsg_lite_alloc_tx_buffer(my_rpmsg, &size, RPMSG_TIMEOUT);
+                if(a35_ready)
+                    tx_buf = rpmsg_lite_alloc_tx_buffer(my_rpmsg, &size, RPMSG_TIMEOUT);
+                else
+                    tx_buf = RL_NULL;
 
                 if(tx_buf == RL_NULL) {
                     PRINTF("LPUART RX dropped : \"%s\" [len : %d]\r\n", app_buf, read_count);
@@ -178,7 +184,7 @@ void app_task(void *param)
 
                 memcpy(tx_buf, app_buf, read_count);
 
-                result = rpmsg_lite_send_nocopy(my_rpmsg, my_ept, remote_addr, tx_buf, len);
+                result = rpmsg_lite_send_nocopy(my_rpmsg, my_ept, remote_addr, tx_buf, read_count);
                 if (result != 0)
                 {
                     assert(false);
