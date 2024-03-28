@@ -126,7 +126,7 @@ void app_task(void *param)
     uint32_t size;
 
     /* Print the initial banner */
-    PRINTF("\r\nRPMSG String Echo FreeRTOS RTOS API Demo...\r\n");
+    PRINTF("\r\nCM33-elux\r\n");
 
     my_rpmsg = rpmsg_lite_remote_init((void *)RPMSG_LITE_SHMEM_BASE, RPMSG_LITE_LINK_ID, RL_NO_FLAGS);
 
@@ -169,25 +169,29 @@ void app_task(void *param)
             assert(false);
 
         if(uart_ready) {
-            size_t read_count =  read_lpuart(&lpuart2, app_buf, sizeof(app_buf));
+            size_t read_count =  read_lpuart_interrupt(&lpuart2, app_buf, sizeof(app_buf));
 
             if(read_count) {
-                if(a35_ready)
-                    tx_buf = rpmsg_lite_alloc_tx_buffer(my_rpmsg, &size, RPMSG_TIMEOUT);
-                else
+                if(a35_ready) {
+                    size_t buf_ind = 0;
+                    while(read_count) {
+                        tx_buf = rpmsg_lite_alloc_tx_buffer(my_rpmsg, &size, RPMSG_TIMEOUT);
+
+                        if(size > read_count)
+                            size = read_count;
+
+                        memcpy(tx_buf, &app_buf[buf_ind], size);
+                        if(rpmsg_lite_send_nocopy(my_rpmsg, my_ept, remote_addr, tx_buf, size) != 0)
+                            assert(false);
+                        read_count -= size;
+                        buf_ind += size;
+                    }
+                } else
                     tx_buf = RL_NULL;
 
                 if(tx_buf == RL_NULL) {
                     PRINTF("LPUART RX dropped : \"%s\" [len : %d]\r\n", app_buf, read_count);
                     continue;
-                }
-
-                memcpy(tx_buf, app_buf, read_count);
-
-                result = rpmsg_lite_send_nocopy(my_rpmsg, my_ept, remote_addr, tx_buf, read_count);
-                if (result != 0)
-                {
-                    assert(false);
                 }
             }
         }
