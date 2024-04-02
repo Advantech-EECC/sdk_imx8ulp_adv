@@ -42,6 +42,11 @@ extern void app_destroy_task(void);
 #define LOCAL_EPT_ADDR (30)
 #endif
 
+/* Globals */
+
+static uint8_t buf_m2u[512]; // mailbox -> uart buffer
+static uint8_t buf_u2m[512]; // uart -> mailbox buffer
+
 volatile bool a35_ready = true;
 static bool uart_ready = false;
 static struct lpuart_io lpuart2;
@@ -57,9 +62,6 @@ static inline uint32_t RGPIO_ReadPinNSE(RGPIO_Type *base, uint32_t pin)
 {
     return ((base->PCNS >> pin) & 0x1);
 }
-
-/* Globals */
-static char app_buf[512]; /* Each RPMSG buffer can carry less than 512 payload */
 
 /*******************************************************************************
  * Prototypes
@@ -123,7 +125,6 @@ void app_task(void *param)
     uint32_t len;
     int32_t result;
     void *tx_buf;
-    uint32_t size;
 
     /* Print the initial banner */
     PRINTF("\r\nCM33-elux\r\n");
@@ -138,62 +139,96 @@ void app_task(void *param)
 
     PRINTF("\r\nNameservice sent, ready for incoming messages...\r\n");
 
+    typedef struct {
+        uint32_t size;
+        uint32_t ndx;
+        uint32_t max_size;
+        uint8_t *buf;
+    } RxContext;
+
+    RxContext m2u = {.size = 0, .ndx = 0, .max_size = sizeof(buf_m2u), .buf = buf_m2u };
+    RxContext u2m = {.size = 0, .ndx = 0, .max_size = sizeof(buf_u2m), .buf = buf_u2m };
+
+    uintptr_t RPMSG_NONBLOCKING = 0; // 0ms timeout == non-blocking
+
     for (;;)
     {
-        if(a35_ready)
-            result = rpmsg_queue_recv_nocopy(my_rpmsg, my_queue, (uint32_t *)&remote_addr, (char **)&rx_buf, &len, RPMSG_TIMEOUT);
-        else
-            result = RL_ERR_NO_BUFF;
+        // Mailbox RX
 
-        if(result == RL_SUCCESS) {
-            assert(len < sizeof(app_buf));
-            memcpy(app_buf, rx_buf, len);
-            app_buf[len] = 0;
+        // If length = 0 means no messages pending to be
+        // forwarded, i.e. contention not needed. The opposite case,
+        // with > 0, means that we're still processing the previous
+        // message, so we skip the read (contention)
+        if (a35_ready && m2u.size == 0)
+        {
+            result = rpmsg_queue_recv_nocopy(my_rpmsg, my_queue, (uint32_t *)&remote_addr, (char **)&rx_buf, &len, RPMSG_NONBLOCKING);
 
-            result = rpmsg_queue_nocopy_free(my_rpmsg, rx_buf);
-            if (result != 0)
+            if (result == RL_SUCCESS)
             {
-                assert(false);
-            }
+                assert(len <= m2u.max_size);
+                memcpy(m2u.buf, rx_buf, len);
 
-            if(uart_ready) {
-                if(!write_lpuart(&lpuart2, app_buf, len))
-                    PRINTF("LPUART TX dropped : \"%s\" [len : %d]\r\n", app_buf, len);
-            } else {
-                if ((len == 2) && (app_buf[0] == 0xd) && (app_buf[1] == 0xa))
-                    PRINTF("Get New Line From Master Side\r\n");
+                result = rpmsg_queue_nocopy_free(my_rpmsg, rx_buf);
+
+                if (result == 0)
+                {
+                    m2u.size = len;
+                    m2u.ndx = 0;
+                    result = rpmsg_queue_nocopy_free(my_rpmsg, rx_buf);
+                    assert(result == 0);
+                }
                 else
-                    PRINTF("Get Message From Master Side : \"%s\" [len : %d]\r\n", app_buf, len);
-            }
-        } else if(result != RL_ERR_NO_BUFF)
-            assert(false);
-
-        if(uart_ready) {
-            size_t read_count =  read_lpuart_interrupt(&lpuart2, app_buf, sizeof(app_buf));
-
-            if(read_count) {
-                if(a35_ready) {
-                    size_t buf_ind = 0;
-                    while(read_count) {
-                        tx_buf = rpmsg_lite_alloc_tx_buffer(my_rpmsg, &size, RPMSG_TIMEOUT);
-
-                        if(size > read_count)
-                            size = read_count;
-
-                        memcpy(tx_buf, &app_buf[buf_ind], size);
-                        if(rpmsg_lite_send_nocopy(my_rpmsg, my_ept, remote_addr, tx_buf, size) != 0)
-                            assert(false);
-                        read_count -= size;
-                        buf_ind += size;
-                    }
-                } else
-                    tx_buf = RL_NULL;
-
-                if(tx_buf == RL_NULL) {
-                    PRINTF("LPUART RX dropped : \"%s\" [len : %d]\r\n", app_buf, read_count);
-                    continue;
+                {
+                    assert(false);
                 }
             }
+            // else: contention (we'll retry later)
+        }
+
+        // UART TX (mailbox -> UART)
+
+        if (uart_ready && m2u.size > 0)
+        {
+            uint8_t *buf = m2u.buf + m2u.ndx;
+            uint32_t tx = write_lpuart(&lpuart2, buf, m2u.size);
+
+            m2u.ndx += tx;
+            m2u.size -= tx;
+
+            //PRINTF("LPUART TX: %u pending, %u actually sent\r\n", m2u.size, tx);
+        }
+
+        // UART RX
+
+        if (uart_ready && u2m.size == 0)
+        {
+            u2m.size = read_lpuart_interrupt(&lpuart2, u2m.buf, u2m.max_size);
+            u2m.ndx = 0;
+        }
+
+        // Mailbox TX (UART -> mailbox)
+
+        if (a35_ready && u2m.size > 0)
+        {
+            uint32_t size;
+            tx_buf = rpmsg_lite_alloc_tx_buffer(my_rpmsg, &size, RPMSG_NONBLOCKING);
+
+            if (tx_buf != RL_NULL)
+            {
+                uint8_t *buf = u2m.buf + u2m.ndx;
+
+                if (size > u2m.size)
+                    size = u2m.size;
+
+                memcpy(tx_buf, buf, size);
+
+                if (rpmsg_lite_send_nocopy(my_rpmsg, my_ept, remote_addr, tx_buf, size) != 0)
+                    assert(false);
+
+                u2m.size -= size;
+                u2m.ndx += size;
+            }
+            // else: contention (we'll retry later)
         }
     }
 }

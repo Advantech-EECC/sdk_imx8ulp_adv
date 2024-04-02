@@ -16,8 +16,9 @@ struct lpuart_io {
 };
 
 bool init_lpuart(struct lpuart_io *handle, LPUART_Type *inst, uint32_t baud);
-size_t read_lpuart(struct lpuart_io *handle, uint8_t *buf, size_t size);
-bool write_lpuart(struct lpuart_io *handle, uint8_t *buf, size_t size);
+uint32_t read_lpuart(struct lpuart_io *handle, uint8_t *buf, uint32_t size);
+uint32_t write_lpuart(struct lpuart_io *handle, uint8_t *buf, uint32_t size);
 void deinit_lpuart(struct lpuart_io *handle);
+size_t read_lpuart_interrupt(struct lpuart_io *handle, uint8_t *buf, size_t size);
 
 #endif

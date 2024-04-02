@@ -14,7 +14,7 @@ bool init_lpuart(struct lpuart_io *handle, LPUART_Type *inst, uint32_t baud)
     handle->config.enableRxRTS  = true;
     handle->config.enableTxCTS  = true;
 
-    if(inst == LPUART2_BASE) {
+    if(inst == (LPUART_Type *)LPUART2_BASE) {
         handle->instance = inst;
         if(!init_lpuart2(handle))
             goto error_handler;
@@ -37,9 +37,9 @@ error_handler:
     return false;
 }
 
-size_t read_lpuart(struct lpuart_io *handle, uint8_t *buf, size_t size)
+uint32_t read_lpuart(struct lpuart_io *handle, uint8_t *buf, uint32_t size)
 {
-    size_t read_bytes = 0;
+    uint32_t read_bytes = 0;
 
     if(0U == (handle->instance->STAT & LPUART_STAT_RDRF_MASK))
         return read_bytes;
@@ -69,9 +69,20 @@ size_t read_lpuart_interrupt(struct lpuart_io *handle, uint8_t *buf, size_t size
     return read_bytes;
 }
 
-bool write_lpuart(struct lpuart_io *handle, uint8_t *buf, size_t size)
+uint32_t write_lpuart(struct lpuart_io *handle, uint8_t *buf, uint32_t size)
 {
-    return LPUART_WriteBlocking(handle->instance, buf, size) == kStatus_Success;
+    const uint32_t tx_fifo_max = 8;
+    uint32_t c = LPUART_GetTxFifoCount(LPUART2);
+    uint32_t available = c < tx_fifo_max ? tx_fifo_max - c : 0;
+    uint32_t written = 0;
+
+    if (size > available)
+        size = available;
+
+    for (; written < size; written++)
+       LPUART_WriteByte(LPUART2, buf[written]);
+
+    return written;
 }
 
 static bool init_lpuart2(struct lpuart_io *handle)
