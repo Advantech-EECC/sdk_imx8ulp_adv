@@ -360,7 +360,6 @@ void lpuart2_task(void *param)
     }
 
     if (RGPIO_ReadPinNSE(GPIOA, 5) != 1 || \
-        RGPIO_ReadPinNSE(GPIOB, 0) != 1 || \
         RGPIO_ReadPinNSE(GPIOB, 1) != 1 || \
         RGPIO_ReadPinNSE(GPIOB, 6) != 1 || \
         RGPIO_ReadPinNSE(GPIOC, 0) != 1 || \
@@ -377,7 +376,6 @@ void lpuart2_task(void *param)
         RGPIO_ReadPinNSE(GPIOC, 23) != 1)
     {
         RGPIO_WritePinNSE(GPIOA, 5);
-        RGPIO_WritePinNSE(GPIOB, 0);
         RGPIO_WritePinNSE(GPIOB, 1);
         RGPIO_WritePinNSE(GPIOB, 6);
         RGPIO_WritePinNSE(GPIOC, 0);
@@ -458,9 +456,17 @@ int main(void)
         .locked  = 0, /* Register not locked. */
     };
 
+    rgpio_pin_config_t pin_config = {
+        kRGPIO_DigitalInput,
+        0,
+    };
+
     /* Initialize standard SDK demo application pins */
     BOARD_ConfigMPU();
     BOARD_InitBootPins();
+
+    IOMUXC_SetPinMux(IOMUXC_PTB0_PTB0, 0U);
+
     BOARD_BootClockRUN();
 
     CLOCK_SetFusionSysClkConfig(&g_sysClkConfigFroSource);
@@ -490,6 +496,9 @@ int main(void)
     RESET_PeripheralReset(kRESET_Tpm0);
 
     APP_SRTM_Init();
+
+    RGPIO_SetPinInterruptConfig(GPIOB, 0U, kRGPIO_InterruptOutput2, kRGPIO_InterruptFallingEdge);
+    RGPIO_PinInit(GPIOB, 0U, &pin_config);
 
     /* register callback for restart the app task when A35 reset */
     APP_SRTM_SetRpmsgMonitor(app_rpmsg_monitor, NULL);

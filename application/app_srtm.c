@@ -146,6 +146,10 @@ bool option_v_boot_flag          = false;
 static bool need_reset_peer_core = false;
 bool wake_acore_flag             = true;
 
+extern volatile bool a35_ready;
+static volatile TickType_t last_a35_wakeup = 0;
+#define A35_WAKE_RETRY_AFTER 1000
+
 pca9460_buck3ctrl_t buck3_ctrl;
 pca9460_ldo1_cfg_t ldo1_cfg;
 
@@ -493,6 +497,10 @@ void APP_WakeupACore(void)
         else
         {
             UPOWER_PowerOnADInPDMode();
+            if(xPortIsInsideInterrupt() == pdTRUE)
+                last_a35_wakeup = xTaskGetTickCountFromISR();
+            else
+                last_a35_wakeup = xTaskGetTickCount();
         }
     }
 }
@@ -743,6 +751,19 @@ static void APP_HandleGPIOHander(uint8_t gpioIdx)
 {
     BaseType_t reschedule = pdFALSE;
     RGPIO_Type *gpio      = gpios[gpioIdx];
+
+    // Handle only PTB0
+    if (1U == gpioIdx &&
+        (1U << APP_PIN_IDX(0)) & RGPIO_GetPinsInterruptFlags(gpio, kRGPIO_InterruptOutput2))
+    {
+        RGPIO_ClearPinsInterruptFlags(gpio, kRGPIO_InterruptOutput2, 1U << APP_PIN_IDX(0));
+        if(!a35_ready) {
+            if((xTaskGetTickCountFromISR() - last_a35_wakeup) > A35_WAKE_RETRY_AFTER) {
+                UPOWER_PowerOnADInPDMode();
+                last_a35_wakeup = xTaskGetTickCountFromISR();
+            }
+        }
+    }
 
     if (APP_GPIO_IDX(APP_PIN_IT6161_INT) == gpioIdx &&
         (1U << APP_PIN_IDX(APP_PIN_IT6161_INT)) & RGPIO_GetPinsInterruptFlags(gpio, APP_GPIO_INT_SEL))
