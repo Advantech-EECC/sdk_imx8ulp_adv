@@ -146,8 +146,6 @@ bool option_v_boot_flag          = false;
 static bool need_reset_peer_core = false;
 bool wake_acore_flag             = true;
 
-extern bool a35_ready;
-
 pca9460_buck3ctrl_t buck3_ctrl;
 pca9460_ldo1_cfg_t ldo1_cfg;
 
@@ -252,8 +250,10 @@ static srtm_service_t ioService;
 static srtm_service_t keypadService;
 static SemaphoreHandle_t monSig;
 static struct rpmsg_lite_instance *rpmsgHandle;
-static app_rpmsg_monitor_t rpmsgMonitor;
-static void *rpmsgMonitorParam;
+static app_rpmsg_monitor_t rpmsgMonitor = NULL;
+static void *rpmsgMonitorParam = NULL;
+static app_ap_online_state_t apNextOnlineState = NULL;
+static void *apNextOnlineStateParam = NULL;
 static TimerHandle_t linkupTimer;
 static TimerHandle_t refreshS400WdgTimer;
 static TimerHandle_t rtcAlarmEventTimer; /* It is used to send alarm event to acore after acore(acore entered power down
@@ -318,6 +318,12 @@ static MU_Type mu0_mua;
 /*******************************************************************************
  * Code
  ******************************************************************************/
+static void NotifyApStateChangeToTasks(bool ready)
+{
+    if (apNextOnlineState)
+            apNextOnlineState(ready, apNextOnlineStateParam);
+}
+
 /* For Deep Sleep Mode of APD */
 bool APP_SRTM_GetSupportDSLForApd(void)
 {
@@ -2133,7 +2139,7 @@ void CMC1_IRQHandler(void)
         /* hold A core for next reboot */
         MU_HoldOtherCoreReset(MU0_MUA);
 
-        a35_ready = true;
+        NotifyApStateChangeToTasks(true);
     }
 }
 
@@ -2172,7 +2178,7 @@ static srtm_status_t APP_SRTM_LfclEventHandler(
 
             if (support_dsl_for_apd != true)
             {
-                a35_ready = false;
+                NotifyApStateChangeToTasks(false);
                 AD_WillEnterMode = AD_PD;
                 PRINTF("\r\nAD will enter Power Down Mode\r\n");
             }
@@ -2534,6 +2540,12 @@ void APP_SRTM_SetRpmsgMonitor(app_rpmsg_monitor_t monitor, void *param)
 {
     rpmsgMonitor      = monitor;
     rpmsgMonitorParam = param;
+}
+
+void APP_SRTM_SetApOnlineChangeState(app_ap_online_state_t onlinef, void *param)
+{
+    apNextOnlineState = onlinef;
+    apNextOnlineStateParam = param;
 }
 
 static srtm_status_t APP_SRTM_I2C_SwitchChannel(srtm_i2c_adapter_t adapter,

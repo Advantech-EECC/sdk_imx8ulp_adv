@@ -26,6 +26,23 @@
 #include "fsl_iomuxc.h"
 #include "lpuart_io.h"
 
+//#define DEBUG_MBOX
+//#define DEBUG_UART
+//#define DEBUG_RXTX_TASK_MAIN_LOOP
+#define DEBUG_A35_ONLINE_TRANSITION
+
+#ifdef DEBUG_UART
+#define PRINTF_UART PRINTF
+#else
+#define PRINTF_UART(...) do {} while (false)
+#endif
+
+#ifdef DEBUG_MBOX
+#define PRINTF_MBOX PRINTF
+#else
+#define PRINTF_MBOX(...) do {} while (false)
+#endif
+
 extern void app_create_task(void);
 extern void app_destroy_task(void);
 /*******************************************************************************
@@ -48,7 +65,10 @@ static uint8_t buf_m2u[512]; // mailbox -> uart buffer
 static uint8_t buf_u2m[512]; // uart -> mailbox buffer
 
 volatile bool a35_ready = true;
-static bool uart_ready = false;
+volatile bool uart_ready = false;
+volatile bool task_stop_rq = false;
+volatile bool task_running = false;
+
 static struct lpuart_io lpuart2;
 
 volatile bool trdc_set = false;
@@ -82,6 +102,17 @@ void app_rpmsg_monitor(struct rpmsg_lite_instance *rpmsgHandle, bool ready, void
     }
 }
 
+void app_ap_online_state_change(bool ready, void *param)
+{
+#ifdef DEBUG_A35_ONLINE_TRANSITION
+    PRINTF("\r\nA35 ready: %d -> %d\r\n", a35_ready, ready);
+#endif
+
+    a35_ready = ready;
+
+    (void)param;
+}
+
 static TaskHandle_t app_task_handle = NULL;
 static TaskHandle_t lpuart2_task_handle = NULL;
 
@@ -91,6 +122,12 @@ static struct rpmsg_lite_endpoint *volatile my_ept = NULL;
 static volatile rpmsg_queue_handle my_queue        = NULL;
 void app_destroy_task(void)
 {
+    task_stop_rq = true;
+
+    PRINTF("\r\nShutting down tasks\r\n");
+
+    vTaskDelay(pdMS_TO_TICKS(10));
+
     if (app_task_handle)
     {
         vTaskDelete(app_task_handle);
@@ -114,6 +151,11 @@ void app_destroy_task(void)
         rpmsg_lite_deinit(my_rpmsg);
         my_rpmsg = NULL;
     }
+
+    task_stop_rq = false;
+    task_running = false;
+
+    PRINTF("\r\nTasks stopped\r\n");
 }
 
 #define RPMSG_TIMEOUT 10
@@ -150,15 +192,32 @@ void app_task(void *param)
 
     uintptr_t RPMSG_NONBLOCKING = 0; // 0ms timeout == non-blocking
 
-    for (;;)
+    for (uint32_t cnt = 0;; cnt++)
     {
+        if (!a35_ready || !uart_ready || task_stop_rq)
+        {
+#ifdef DEBUG_RXTX_TASK_MAIN_LOOP
+            PRINTF("A35: %d LPUART2: %d STOP_RQ: %d [%u]\r\n",
+                   a35_ready, uart_ready, task_stop_rq, cnt);
+            vTaskDelay(pdMS_TO_TICKS(1000));
+#else
+            vTaskDelay(pdMS_TO_TICKS(1));
+#endif
+            continue;
+        }
+
+#ifdef DEBUG_RXTX_TASK_MAIN_LOOP
+        PRINTF("A35: %d LPUART2: %d [%u]\r\n", a35_ready, uart_ready, cnt);
+        vTaskDelay(pdMS_TO_TICKS(1000));
+#endif
+
         // Mailbox RX
 
         // If length = 0 means no messages pending to be
         // forwarded, i.e. contention not needed. The opposite case,
         // with > 0, means that we're still processing the previous
         // message, so we skip the read (contention)
-        if (a35_ready && m2u.size == 0)
+        if (m2u.size == 0)
         {
             result = rpmsg_queue_recv_nocopy(my_rpmsg, my_queue, (uint32_t *)&remote_addr, (char **)&rx_buf, &m2u.size, RPMSG_NONBLOCKING);
 
@@ -172,12 +231,12 @@ void app_task(void *param)
 
                 if (result == 0)
                 {
-                    PRINTF("Mailbox RX: %d bytes\r\n", m2u.size);
+                    PRINTF_MBOX("Mailbox RX: %d bytes\r\n", m2u.size);
                 }
                 else
                 {
                     m2u.size = 0;
-                    PRINTF("Mailbox RX free error\r\n");
+                    PRINTF("Mailbox RX free error (TSNH)\r\n");
                     assert(false);
                 }
             }
@@ -185,13 +244,13 @@ void app_task(void *param)
             {
                 // else: contention (we'll retry later)
                 if (result != RL_ERR_NO_BUFF)
-                    PRINTF("Mailbox RX: %08x\r\n", (unsigned)result);
+                    PRINTF_MBOX("Mailbox RX: %08x\r\n", (unsigned)result);
             }
         }
 
         // UART TX (mailbox -> UART)
 
-        if (uart_ready && m2u.size > 0)
+        if (m2u.size > 0)
         {
             uint8_t *buf = m2u.buf + m2u.ndx;
             uint32_t tx = write_lpuart(&lpuart2, buf, m2u.size);
@@ -199,23 +258,23 @@ void app_task(void *param)
             m2u.ndx += tx;
             m2u.size -= tx;
 
-            PRINTF("LPUART TX: %u pending, %u actually sent\r\n", m2u.size, tx);
+            PRINTF_UART("LPUART TX %u left %u\r\n", tx, m2u.size);
         }
 
         // UART RX
 
-        if (uart_ready && u2m.size == 0)
+        if (u2m.size == 0)
         {
             u2m.size = read_lpuart_interrupt(&lpuart2, u2m.buf, u2m.max_size);
             u2m.ndx = 0;
 
             if (u2m.size > 0)
-                PRINTF("UART RX: %d bytes (max: %d)\r\n", u2m.size);
+                PRINTF_UART("LPUART RX %d\r\n", u2m.size);
         }
 
         // Mailbox TX (UART -> mailbox)
 
-        if (a35_ready && u2m.size > 0)
+        if (u2m.size > 0)
         {
             uint32_t size;
             tx_buf = rpmsg_lite_alloc_tx_buffer(my_rpmsg, &size, RPMSG_NONBLOCKING);
@@ -236,17 +295,17 @@ void app_task(void *param)
                     u2m.size -= size;
                     u2m.ndx += size;
 
-                    PRINTF("Mailbox TX: %u pending, %u actually sent\r\n", u2m.size, size);
+                    PRINTF_MBOX("Mailbox TX %u left %u\r\n", size, u2m.size);
                 }
                 else
                 {
-                    PRINTF("Mailbox TX: send_nocopy error (%d)\r\n", result);
+                    PRINTF_MBOX("Mailbox TX: send error (%d)\r\n", result);
                     assert(false);
                 }
             }
             else
             {
-                PRINTF("Mailbox TX: contention (we'll retry later)\r\n");
+                PRINTF_MBOX("Mailbox TX: contention (we'll retry later)\r\n");
             }
         }
     }
@@ -330,6 +389,17 @@ void lpuart2_task(void *param)
 
 void app_create_task(void)
 {
+    if (task_running)
+    {
+        PRINTF("\r\nTask restart (TSNH)\r\n");
+
+        app_destroy_task();
+    }
+
+    task_running = true;
+
+    PRINTF("\r\nCreate tasks\r\n");
+
     if (app_task_handle == NULL &&
         xTaskCreate(app_task, "APP_TASK", APP_TASK_STACK_SIZE, NULL, tskIDLE_PRIORITY + 1, &app_task_handle) != pdPASS)
     {
@@ -395,6 +465,7 @@ int main(void)
 
     /* register callback for restart the app task when A35 reset */
     APP_SRTM_SetRpmsgMonitor(app_rpmsg_monitor, NULL);
+    APP_SRTM_SetApOnlineChangeState(app_ap_online_state_change, NULL);
 
     APP_SRTM_StartCommunication();
 

@@ -163,6 +163,7 @@ extern int32_t RPMsg_MU0_A_IRQHandler(void);
 
 typedef void (*app_rpmsg_monitor_t)(struct rpmsg_lite_instance *rpmsgHandle, bool ready, void *param);
 typedef void (*app_irq_handler_t)(IRQn_Type irq, void *param);
+typedef void (*app_ap_online_state_t)(bool ready, void *param);
 
 /*******************************************************************************
  * API
@@ -180,6 +181,9 @@ void APP_SRTM_StartCommunication(void);
 
 /* Set RPMsg channel init/deinit monitor */
 void APP_SRTM_SetRpmsgMonitor(app_rpmsg_monitor_t monitor, void *param);
+
+/* Report Application Processor (A35) next online state */
+void APP_SRTM_SetApOnlineChangeState(app_ap_online_state_t onlinef, void *param);
 
 uint8_t APP_Read_I2C_Register(uint8_t busID, uint16_t slaveAddr, uint8_t regIndex);
 uint8_t APP_Write_I2C_Register(uint8_t busID, uint16_t slaveAddr, uint8_t regIndex, uint8_t value);
