@@ -220,41 +220,18 @@ void app_subtask_mailbox_tx(RxTxContext *c)
     if (c->size == 0 || my_rpmsg_remote_addr == 0)
         return;
 
-    void *tx_buf;
-    uint32_t size;
+    char *buf = (char *)c->buf;
+    int32_t result = rpmsg_lite_send(my_rpmsg, my_ept, my_rpmsg_remote_addr,
+                                     buf, c->size, RPMSG_NONBLOCKING);
 
-    tx_buf = rpmsg_lite_alloc_tx_buffer(my_rpmsg, &size, RPMSG_NONBLOCKING);
-
-    if (tx_buf != RL_NULL)
+    if (result == RL_SUCCESS)
     {
-        uint8_t *buf = c->buf + c->ndx;
+	PRINTF_MBOX("Mailbox TX %u\r\n", c->size);
 
-        if (size > c->size)
-            size = c->size;
-
-        memcpy(tx_buf, buf, size);
-
-        int32_t result = rpmsg_lite_send_nocopy(my_rpmsg, my_ept, my_rpmsg_remote_addr, tx_buf, size);
-
-
-
-        if (result == RL_SUCCESS)
-        {
-            c->size -= size;
-            c->ndx += size;
-
-            PRINTF_MBOX("Mailbox TX %u left %u\r\n", size, c->size);
-        }
-        else
-        {
-            PRINTF_MBOX("Mailbox TX: send error (%d)\r\n", result);
-            assert(false);
-        }
+        c->size = 0;
+        c->ndx = 0;
     }
-    else
-    {
-        PRINTF_MBOX("Mailbox TX: contention (we'll retry later)\r\n");
-    }
+    // else: contention (we'll retry later)
 }
 
 void app_subtask_uart_rx(RxTxContext *c)
