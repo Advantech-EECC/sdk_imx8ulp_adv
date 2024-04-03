@@ -122,7 +122,6 @@ void app_task(void *param)
 {
     volatile uint32_t remote_addr;
     void *rx_buf;
-    uint32_t len;
     int32_t result;
     void *tx_buf;
 
@@ -161,28 +160,33 @@ void app_task(void *param)
         // message, so we skip the read (contention)
         if (a35_ready && m2u.size == 0)
         {
-            result = rpmsg_queue_recv_nocopy(my_rpmsg, my_queue, (uint32_t *)&remote_addr, (char **)&rx_buf, &len, RPMSG_NONBLOCKING);
+            result = rpmsg_queue_recv_nocopy(my_rpmsg, my_queue, (uint32_t *)&remote_addr, (char **)&rx_buf, &m2u.size, RPMSG_NONBLOCKING);
 
             if (result == RL_SUCCESS)
             {
-                assert(len <= m2u.max_size);
-                memcpy(m2u.buf, rx_buf, len);
+                assert(m2u.size <= m2u.max_size);
+                memcpy(m2u.buf, rx_buf, m2u.size);
+                m2u.ndx = 0;
 
                 result = rpmsg_queue_nocopy_free(my_rpmsg, rx_buf);
 
                 if (result == 0)
                 {
-                    m2u.size = len;
-                    m2u.ndx = 0;
-                    result = rpmsg_queue_nocopy_free(my_rpmsg, rx_buf);
-                    assert(result == 0);
+                    PRINTF("Mailbox RX: %d bytes\r\n", m2u.size);
                 }
                 else
                 {
+                    m2u.size = 0;
+                    PRINTF("Mailbox RX free error\r\n");
                     assert(false);
                 }
             }
-            // else: contention (we'll retry later)
+            else
+            {
+                // else: contention (we'll retry later)
+                if (result != RL_ERR_NO_BUFF)
+                    PRINTF("Mailbox RX: %08x\r\n", (unsigned)result);
+            }
         }
 
         // UART TX (mailbox -> UART)
@@ -195,7 +199,7 @@ void app_task(void *param)
             m2u.ndx += tx;
             m2u.size -= tx;
 
-            //PRINTF("LPUART TX: %u pending, %u actually sent\r\n", m2u.size, tx);
+            PRINTF("LPUART TX: %u pending, %u actually sent\r\n", m2u.size, tx);
         }
 
         // UART RX
@@ -204,6 +208,9 @@ void app_task(void *param)
         {
             u2m.size = read_lpuart_interrupt(&lpuart2, u2m.buf, u2m.max_size);
             u2m.ndx = 0;
+
+            if (u2m.size > 0)
+                PRINTF("UART RX: %d bytes (max: %d)\r\n", u2m.size);
         }
 
         // Mailbox TX (UART -> mailbox)
@@ -222,13 +229,25 @@ void app_task(void *param)
 
                 memcpy(tx_buf, buf, size);
 
-                if (rpmsg_lite_send_nocopy(my_rpmsg, my_ept, remote_addr, tx_buf, size) != 0)
-                    assert(false);
+                result = rpmsg_lite_send_nocopy(my_rpmsg, my_ept, remote_addr, tx_buf, size);
 
-                u2m.size -= size;
-                u2m.ndx += size;
+                if (result == RL_SUCCESS)
+                {
+                    u2m.size -= size;
+                    u2m.ndx += size;
+
+                    PRINTF("Mailbox TX: %u pending, %u actually sent\r\n", u2m.size, size);
+                }
+                else
+                {
+                    PRINTF("Mailbox TX: send_nocopy error (%d)\r\n", result);
+                    assert(false);
+                }
             }
-            // else: contention (we'll retry later)
+            else
+            {
+                PRINTF("Mailbox TX: contention (we'll retry later)\r\n");
+            }
         }
     }
 }
