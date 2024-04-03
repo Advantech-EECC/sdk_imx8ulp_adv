@@ -53,16 +53,25 @@ extern void app_destroy_task(void);
 #define RPMSG_LITE_NS_ANNOUNCE_STRING "rpmsg-virtual-tty-channel"
 #define RPMSG_LITE_MASTER_IS_LINUX
 
-#define APP_DEBUG_UART_BAUDRATE (115200U) /* Debug console baud rate. */
+#define APP_LPUART2_BAUDRATE 115200
+//#define APP_LPUART2_BAUDRATE 460800
+//#define APP_LPUART2_BAUDRATE 921600
 #define APP_TASK_STACK_SIZE (256)
 #ifndef LOCAL_EPT_ADDR
 #define LOCAL_EPT_ADDR (30)
 #endif
 
+typedef struct {
+    uint32_t size;
+    uint32_t ndx;
+    uint32_t max_size;
+    uint8_t *buf;
+} RxTxContext;
+
 /* Globals */
 
 static uint8_t buf_m2u[512]; // mailbox -> uart buffer
-static uint8_t buf_u2m[512]; // uart -> mailbox buffer
+static uint8_t buf_u2m[496]; // uart -> mailbox buffer
 
 volatile bool a35_ready = true;
 volatile bool uart_ready = false;
@@ -72,6 +81,8 @@ volatile bool task_running = false;
 static struct lpuart_io lpuart2;
 
 volatile bool trdc_set = false;
+
+static const uintptr_t RPMSG_NONBLOCKING = 0; // 0ms timeout == non-blocking
 
 static inline void RGPIO_WritePinNSE(RGPIO_Type *base, uint32_t pin)
 {
@@ -120,6 +131,8 @@ static struct rpmsg_lite_instance *volatile my_rpmsg = NULL;
 
 static struct rpmsg_lite_endpoint *volatile my_ept = NULL;
 static volatile rpmsg_queue_handle my_queue        = NULL;
+static volatile uint32_t my_rpmsg_remote_addr      = 0;
+
 void app_destroy_task(void)
 {
     task_stop_rq = true;
@@ -158,15 +171,141 @@ void app_destroy_task(void)
     PRINTF("\r\nTasks stopped\r\n");
 }
 
-#define RPMSG_TIMEOUT 10
+void app_subtask_mailbox_rx(RxTxContext *c)
+{
+    // Mailbox RX
+
+    // If length = 0 means no messages pending to be
+    // forwarded, i.e. contention not needed. The opposite case,
+    // with > 0, means that we're still processing the previous
+    // message, so we skip the read (contention)
+
+    if (c->size > 0)
+        return;
+
+    void *rx_buf;
+    int32_t result = rpmsg_queue_recv_nocopy(my_rpmsg, my_queue, (uint32_t *)&my_rpmsg_remote_addr, (char **)&rx_buf, &c->size, RPMSG_NONBLOCKING);
+
+    if (result == RL_SUCCESS)
+    {
+        assert(c->size <= c->max_size);
+        memcpy(c->buf, rx_buf, c->size);
+        c->ndx = 0;
+
+        result = rpmsg_queue_nocopy_free(my_rpmsg, rx_buf);
+
+        if (result == 0)
+        {
+            PRINTF_MBOX("Mailbox RX: %d bytes\r\n", c->size);
+        }
+        else
+        {
+            c->size = 0;
+            PRINTF("Mailbox RX free error (TSNH)\r\n");
+            assert(false);
+        }
+    }
+    else
+    {
+        // else: contention (we'll retry later)
+        if (result != RL_ERR_NO_BUFF)
+            PRINTF_MBOX("Mailbox RX: %08x\r\n", (unsigned)result);
+    }
+}
+
+void app_subtask_mailbox_tx(RxTxContext *c)
+{
+    // Mailbox TX (UART -> mailbox)
+
+    if (c->size == 0 || my_rpmsg_remote_addr == 0)
+        return;
+
+    void *tx_buf;
+    uint32_t size;
+
+    tx_buf = rpmsg_lite_alloc_tx_buffer(my_rpmsg, &size, RPMSG_NONBLOCKING);
+
+    if (tx_buf != RL_NULL)
+    {
+        uint8_t *buf = c->buf + c->ndx;
+
+        if (size > c->size)
+            size = c->size;
+
+        memcpy(tx_buf, buf, size);
+
+        int32_t result = rpmsg_lite_send_nocopy(my_rpmsg, my_ept, my_rpmsg_remote_addr, tx_buf, size);
+
+
+
+        if (result == RL_SUCCESS)
+        {
+            c->size -= size;
+            c->ndx += size;
+
+            PRINTF_MBOX("Mailbox TX %u left %u\r\n", size, c->size);
+        }
+        else
+        {
+            PRINTF_MBOX("Mailbox TX: send error (%d)\r\n", result);
+            assert(false);
+        }
+    }
+    else
+    {
+        PRINTF_MBOX("Mailbox TX: contention (we'll retry later)\r\n");
+    }
+}
+
+void app_subtask_uart_rx(RxTxContext *c)
+{
+    // UART RX
+
+    if (c->size > 0)
+        return;
+
+    c->size = read_lpuart_interrupt(&lpuart2, c->buf + c->ndx, c->max_size);
+    c->ndx = 0;
+
+    if (c->size > 0)
+        PRINTF_UART("LPUART RX %d\r\n", c->size);
+}
+
+void app_subtask_uart_rx__simulate_high_throughput(RxTxContext *c)
+{
+    // UART RX
+
+    if (c->size > 0)
+        return;
+
+    for (size_t i = 0; i < c->max_size; i++)
+        c->buf[i] = 'a' + (i % 26);
+
+    c->size = c->max_size;
+    c->ndx = 0;
+}
+
+void app_subtask_uart_tx(RxTxContext *c)
+{
+    // UART TX (mailbox -> UART)
+
+    if (c->size > 0)
+    {
+        uint8_t *buf = c->buf + c->ndx;
+        uint32_t tx = write_lpuart(&lpuart2, buf, c->size);
+
+        c->ndx += tx;
+        c->size -= tx;
+
+        if (c->size == 0)
+            c->ndx = 0;
+
+        PRINTF_UART("LPUART TX %u left %u\r\n", tx, c->size);
+    }
+}
 
 void app_task(void *param)
 {
-    volatile uint32_t remote_addr;
-    void *rx_buf;
-    int32_t result;
-    void *tx_buf;
-
     /* Print the initial banner */
     PRINTF("\r\nCM33-elux\r\n");
 
@@ -180,17 +319,8 @@ void app_task(void *param)
 
     PRINTF("\r\nNameservice sent, ready for incoming messages...\r\n");
 
-    typedef struct {
-        uint32_t size;
-        uint32_t ndx;
-        uint32_t max_size;
-        uint8_t *buf;
-    } RxContext;
-
-    RxContext m2u = {.size = 0, .ndx = 0, .max_size = sizeof(buf_m2u), .buf = buf_m2u };
-    RxContext u2m = {.size = 0, .ndx = 0, .max_size = sizeof(buf_u2m), .buf = buf_u2m };
-
-    uintptr_t RPMSG_NONBLOCKING = 0; // 0ms timeout == non-blocking
+    RxTxContext m2u = {.size = 0, .ndx = 0, .max_size = sizeof(buf_m2u), .buf = buf_m2u };
+    RxTxContext u2m = {.size = 0, .ndx = 0, .max_size = sizeof(buf_u2m), .buf = buf_u2m };
 
     for (uint32_t cnt = 0;; cnt++)
     {
@@ -211,103 +341,10 @@ void app_task(void *param)
         vTaskDelay(pdMS_TO_TICKS(1000));
 #endif
 
-        // Mailbox RX
-
-        // If length = 0 means no messages pending to be
-        // forwarded, i.e. contention not needed. The opposite case,
-        // with > 0, means that we're still processing the previous
-        // message, so we skip the read (contention)
-        if (m2u.size == 0)
-        {
-            result = rpmsg_queue_recv_nocopy(my_rpmsg, my_queue, (uint32_t *)&remote_addr, (char **)&rx_buf, &m2u.size, RPMSG_NONBLOCKING);
-
-            if (result == RL_SUCCESS)
-            {
-                assert(m2u.size <= m2u.max_size);
-                memcpy(m2u.buf, rx_buf, m2u.size);
-                m2u.ndx = 0;
-
-                result = rpmsg_queue_nocopy_free(my_rpmsg, rx_buf);
-
-                if (result == 0)
-                {
-                    PRINTF_MBOX("Mailbox RX: %d bytes\r\n", m2u.size);
-                }
-                else
-                {
-                    m2u.size = 0;
-                    PRINTF("Mailbox RX free error (TSNH)\r\n");
-                    assert(false);
-                }
-            }
-            else
-            {
-                // else: contention (we'll retry later)
-                if (result != RL_ERR_NO_BUFF)
-                    PRINTF_MBOX("Mailbox RX: %08x\r\n", (unsigned)result);
-            }
-        }
-
-        // UART TX (mailbox -> UART)
-
-        if (m2u.size > 0)
-        {
-            uint8_t *buf = m2u.buf + m2u.ndx;
-            uint32_t tx = write_lpuart(&lpuart2, buf, m2u.size);
-
-            m2u.ndx += tx;
-            m2u.size -= tx;
-
-            PRINTF_UART("LPUART TX %u left %u\r\n", tx, m2u.size);
-        }
-
-        // UART RX
-
-        if (u2m.size == 0)
-        {
-            u2m.size = read_lpuart_interrupt(&lpuart2, u2m.buf, u2m.max_size);
-            u2m.ndx = 0;
-
-            if (u2m.size > 0)
-                PRINTF_UART("LPUART RX %d\r\n", u2m.size);
-        }
-
-        // Mailbox TX (UART -> mailbox)
-
-        if (u2m.size > 0)
-        {
-            uint32_t size;
-            tx_buf = rpmsg_lite_alloc_tx_buffer(my_rpmsg, &size, RPMSG_NONBLOCKING);
-
-            if (tx_buf != RL_NULL)
-            {
-                uint8_t *buf = u2m.buf + u2m.ndx;
-
-                if (size > u2m.size)
-                    size = u2m.size;
-
-                memcpy(tx_buf, buf, size);
-
-                result = rpmsg_lite_send_nocopy(my_rpmsg, my_ept, remote_addr, tx_buf, size);
-
-                if (result == RL_SUCCESS)
-                {
-                    u2m.size -= size;
-                    u2m.ndx += size;
-
-                    PRINTF_MBOX("Mailbox TX %u left %u\r\n", size, u2m.size);
-                }
-                else
-                {
-                    PRINTF_MBOX("Mailbox TX: send error (%d)\r\n", result);
-                    assert(false);
-                }
-            }
-            else
-            {
-                PRINTF_MBOX("Mailbox TX: contention (we'll retry later)\r\n");
-            }
-        }
+        app_subtask_mailbox_rx(&m2u);
+        app_subtask_uart_tx(&m2u);
+        app_subtask_uart_rx(&u2m);
+        app_subtask_mailbox_tx(&u2m);
     }
 }
 
@@ -373,7 +410,7 @@ void lpuart2_task(void *param)
         RGPIO_WritePinNSE(GPIOC, 23);
     }
 
-    if(!init_lpuart(&lpuart2, LPUART2, 115200)) {
+    if(!init_lpuart(&lpuart2, LPUART2, APP_LPUART2_BAUDRATE)) {
         PRINTF("LPUART Initialization failed\r\n");
         while(1) {
 
