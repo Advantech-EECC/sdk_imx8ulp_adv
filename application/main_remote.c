@@ -398,6 +398,11 @@ void lpuart2_task(void *param)
 
     for (;;)
     {
+        // The work is done in the ISR: this task must leave all the
+        // time to the 'app_task', as its busy loop has real-time
+        // requirements below the task switching smallest tick
+
+        taskYIELD();
     }
 }
 
