@@ -196,7 +196,25 @@ void app_subtask_mailbox_rx(RxTxContext *c)
 
         if (result == 0)
         {
+            static bool hello_pending = true;
+
             PRINTF_MBOX("Mailbox RX: %d bytes\r\n", c->size);
+
+            if (hello_pending) {
+                const uint32_t first_msg_sz = 12;
+                const char *first_msg = "hello world!";
+
+                if (c->size == first_msg_sz &&
+                    memcmp(first_msg, c->buf, first_msg_sz) == 0)
+                {
+                    // if the first message is the 'hello', we
+                    // remove it (we'll change this once gets
+                    // removed from the Linux kernel driver side)
+                    c->size = 0;
+                }
+
+                hello_pending = false;
+            }
         }
         else
         {
