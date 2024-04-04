@@ -226,7 +226,7 @@ void app_subtask_mailbox_tx(RxTxContext *c)
 
     if (result == RL_SUCCESS)
     {
-	PRINTF_MBOX("Mailbox TX %u\r\n", c->size);
+        PRINTF_MBOX("Mailbox TX %u\r\n", c->size);
 
         c->size = 0;
         c->ndx = 0;
