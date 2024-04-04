@@ -286,13 +286,16 @@ void app_subtask_uart_tx(RxTxContext *c)
 
     if (c->size > 0)
     {
+        uint32_t tx;
         uint8_t *buf = c->buf + c->ndx;
-        uint32_t tx = write_lpuart(&lpuart2, buf, c->size);
 
-        c->ndx += tx;
-        c->size -= tx;
+        do {
+            tx = write_lpuart(&lpuart2, buf, c->size);
+            c->ndx += tx;
+            c->size -= tx;
+        } while (tx > 0);
 
-        if (c->size == 0)
+        if (c->size == 0) // prepare ndx for next transfer
             c->ndx = 0;
 
         PRINTF_UART("LPUART TX %u left %u\r\n", tx, c->size);
