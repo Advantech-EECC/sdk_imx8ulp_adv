@@ -105,12 +105,18 @@ void LPUART2_IRQHandler(void)
 {
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
     if(ext_handle != NULL) {
-        uint8_t data;
         /* If new data arrived. */
         if ((kLPUART_RxDataRegFullFlag)&LPUART_GetStatusFlags(ext_handle->instance))
         {
-            data = LPUART_ReadByte(ext_handle->instance);
-            xStreamBufferSendFromISR(ext_handle->rx_buffer, &data, 1, &xHigherPriorityTaskWoken);
+            uint8_t data[8];
+            const uint32_t rx_fifo_max = sizeof(data);
+            uint32_t c = LPUART_GetRxFifoCount(LPUART2);
+            uint32_t i = 0;
+
+            for (; i < c; i++)
+                data[i] = LPUART_ReadByte(ext_handle->instance);
+
+            xStreamBufferSendFromISR(ext_handle->rx_buffer, data, i, &xHigherPriorityTaskWoken);
         }
     }
     SDK_ISR_EXIT_BARRIER;
