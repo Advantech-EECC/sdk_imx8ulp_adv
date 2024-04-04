@@ -183,44 +183,32 @@ void app_subtask_mailbox_rx(RxTxContext *c)
     if (c->size > 0)
         return;
 
-    void *rx_buf;
-    int32_t result = rpmsg_queue_recv_nocopy(my_rpmsg, my_queue, (uint32_t *)&my_rpmsg_remote_addr, (char **)&rx_buf, &c->size, RPMSG_NONBLOCKING);
+    int32_t result = rpmsg_queue_recv(my_rpmsg, my_queue, &my_rpmsg_remote_addr,
+                                      c->buf, c->max_size, &c->size,
+                                      RPMSG_NONBLOCKING);
 
     if (result == RL_SUCCESS)
     {
-        assert(c->size <= c->max_size);
-        memcpy(c->buf, rx_buf, c->size);
         c->ndx = 0;
 
-        result = rpmsg_queue_nocopy_free(my_rpmsg, rx_buf);
+        static bool hello_pending = true;
 
-        if (result == 0)
-        {
-            static bool hello_pending = true;
+        PRINTF_MBOX("Mailbox RX: %d bytes\r\n", c->size);
 
-            PRINTF_MBOX("Mailbox RX: %d bytes\r\n", c->size);
+        if (hello_pending) {
+            const uint32_t first_msg_sz = 12;
+            const char *first_msg = "hello world!";
 
-            if (hello_pending) {
-                const uint32_t first_msg_sz = 12;
-                const char *first_msg = "hello world!";
-
-                if (c->size == first_msg_sz &&
-                    memcmp(first_msg, c->buf, first_msg_sz) == 0)
-                {
-                    // if the first message is the 'hello', we
-                    // remove it (we'll change this once gets
-                    // removed from the Linux kernel driver side)
-                    c->size = 0;
-                }
-
-                hello_pending = false;
+            if (c->size == first_msg_sz &&
+                memcmp(first_msg, c->buf, first_msg_sz) == 0)
+            {
+                // if the first message is the 'hello', we
+                // remove it (we'll change this once gets
+                // removed from the Linux kernel driver side)
+                c->size = 0;
             }
-        }
-        else
-        {
-            c->size = 0;
-            PRINTF("Mailbox RX free error (TSNH)\r\n");
-            assert(false);
+
+            hello_pending = false;
         }
     }
     else
