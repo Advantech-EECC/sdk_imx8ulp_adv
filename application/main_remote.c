@@ -84,8 +84,9 @@ typedef struct {
 
 /* Globals */
 
-static uint8_t buf_m2u[512]; // mailbox -> uart buffer
-static uint8_t buf_u2m[496]; // uart -> mailbox buffer
+// Mailbox max payload set to 496
+static uint8_t buf_m2u[RL_BUFFER_PAYLOAD_SIZE(0)]; // mailbox -> uart buffer
+static uint8_t buf_u2m[RL_BUFFER_PAYLOAD_SIZE(0)]; // uart -> mailbox buffer
 
 volatile bool a35_ready = true;
 volatile bool uart_ready = false;
