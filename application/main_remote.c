@@ -283,6 +283,19 @@ void app_subtask_uart_rx__simulate_high_throughput(RxTxContext *c)
     c->ndx = 0;
 }
 
+void app_subtask_uart_tx__simulate_sink(RxTxContext *c)
+{
+    // UART TX (mailbox -> UART)
+
+    if (c->size > 0)
+    {
+        PRINTF_UART("LPUART TX %u (sink)\r\n", c->size);
+
+        c->size = 0;
+        c->ndx = 0;
+    }
+}
+
 void app_subtask_uart_tx(RxTxContext *c)
 {
     // UART TX (mailbox -> UART)
