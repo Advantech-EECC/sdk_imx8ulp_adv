@@ -77,6 +77,7 @@ static uint8_t buf_m2u[RL_BUFFER_PAYLOAD_SIZE(0)]; // mailbox -> uart buffer
 static uint8_t buf_u2m[RL_BUFFER_PAYLOAD_SIZE(0)]; // uart -> mailbox buffer
 
 volatile bool a35_ready = true;
+volatile bool a35_wakeup_signal = false;
 volatile bool uart_ready = false;
 volatile bool task_stop_rq = false;
 volatile bool task_running = false;
@@ -118,11 +119,25 @@ void app_rpmsg_monitor(struct rpmsg_lite_instance *rpmsgHandle, bool ready,
 
 void app_ap_online_state_change(bool ready, void *param)
 {
+    if (ready)
+    {
+        // Instead of changing the 'a35_ready' immediatly, we signal it,
+        // so it can be handled in the 'app_task' loop
+        a35_wakeup_signal = true;
+
 #ifdef DEBUG_A35_ONLINE_TRANSITION
-    PRINTF("\r\nA35 ready: %d -> %d\r\n", a35_ready, ready);
+        PRINTF("\r\nA35 wake-up notification\r\n");
+#endif
+    }
+    else
+    {
+#ifdef DEBUG_A35_ONLINE_TRANSITION
+        PRINTF("\r\nA35 go to offline notification\r\n");
 #endif
 
-    a35_ready = ready;
+        // A35 offline: change the state immediately
+        a35_ready = false;
+    }
 
     (void)param;
 }
@@ -304,6 +319,23 @@ void app_task(void *param)
 
     for (uint32_t cnt = 0;; cnt++)
     {
+        if (a35_wakeup_signal)
+        {
+            if (!a35_ready)
+            {
+                const uint32_t delay_ms = 1000;
+
+                // A35 wake up signal: wait for 1s before making it effective
+                vTaskDelay(pdMS_TO_TICKS(delay_ms));
+                a35_ready = true;
+
+#ifdef DEBUG_A35_ONLINE_TRANSITION
+               PRINTF("\r\nA35 is back online (delayed %u ms)\r\n", delay_ms);
+#endif
+            }
+            a35_wakeup_signal = false;
+        }
+
         if (!a35_ready || !uart_ready || task_stop_rq)
         {
 #ifdef DEBUG_RXTX_TASK_MAIN_LOOP
