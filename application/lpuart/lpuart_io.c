@@ -6,7 +6,7 @@ static struct lpuart_io *ext_handle = NULL;
 static bool init_lpuart2(struct lpuart_io *handle);
 
 bool init_lpuart(struct lpuart_io *handle, LPUART_Type *inst, uint32_t baud)
-{       
+{
     LPUART_GetDefaultConfig(&handle->config);
     handle->config.baudRate_Bps = baud;
     handle->config.enableTx     = true;
@@ -65,7 +65,7 @@ size_t read_lpuart_interrupt(struct lpuart_io *handle, uint8_t *buf, size_t size
 
     if(bytes_avl)
         read_bytes = xStreamBufferReceive(handle->rx_buffer, (void *)buf, bytes_avl, 0);
-    
+
     return read_bytes;
 }
 
@@ -104,16 +104,20 @@ void deinit_lpuart(struct lpuart_io *handle)
 void LPUART2_IRQHandler(void)
 {
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+
     if(ext_handle != NULL) {
         /* If new data arrived. */
-        if ((kLPUART_RxDataRegFullFlag)&LPUART_GetStatusFlags(ext_handle->instance))
-        {
-            uint8_t data[8];
-            const uint32_t rx_fifo_max = sizeof(data);
-            uint32_t c = LPUART_GetRxFifoCount(LPUART2);
-            uint32_t i = 0;
+        uint32_t status = LPUART_GetStatusFlags(ext_handle->instance);
 
-            for (; i < c; i++)
+        if ((status & kLPUART_RxDataRegFullFlag) != 0)
+        {
+            uint8_t data[32]; // e.g. iMX8ulp has an 8-byte RX FIFO
+            const uint32_t rx_fifo_max = sizeof(data);
+            uint32_t i = 0;
+            uint32_t c = LPUART_GetRxFifoCount(LPUART2);
+            uint32_t rx_avail = c <= rx_fifo_max ? c : rx_fifo_max;
+
+            for (; i < rx_avail; i++)
                 data[i] = LPUART_ReadByte(ext_handle->instance);
 
             xStreamBufferSendFromISR(ext_handle->rx_buffer, data, i, &xHigherPriorityTaskWoken);

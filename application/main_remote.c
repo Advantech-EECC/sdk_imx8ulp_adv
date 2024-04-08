@@ -198,8 +198,9 @@ void app_subtask_mailbox_rx(RxTxContext *c)
     if (c->size > 0)
         return;
 
-    int32_t result = rpmsg_queue_recv(my_rpmsg, my_queue, &my_rpmsg_remote_addr,
-                                      c->buf, c->max_size, &c->size,
+    int32_t result = rpmsg_queue_recv(my_rpmsg, my_queue,
+                                      (uint32_t *)&my_rpmsg_remote_addr,
+                                      (char *)c->buf, c->max_size, &c->size,
                                       RPMSG_NONBLOCKING);
 
     if (result == RL_SUCCESS)
@@ -314,7 +315,7 @@ void app_subtask_uart_tx(RxTxContext *c)
             tx = write_lpuart(&lpuart2, buf, c->size);
             c->ndx += tx;
             c->size -= tx;
-        } while (tx > 0);
+        } while (tx > 0 && c->size > 0);
 
         if (c->size == 0) // prepare ndx for next transfer
             c->ndx = 0;
