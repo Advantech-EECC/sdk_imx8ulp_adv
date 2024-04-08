@@ -54,21 +54,9 @@ extern void app_destroy_task(void);
 #define RPMSG_LITE_MASTER_IS_LINUX
 
 
-//#define APP_LPUART2_BAUDRATE 9600
-//#define APP_LPUART2_BAUDRATE 19200
-//#define APP_LPUART2_BAUDRATE 38400
-//#define APP_LPUART2_BAUDRATE 57600
-//#define APP_LPUART2_BAUDRATE 115200
-//#define APP_LPUART2_BAUDRATE 230400
-//#define APP_LPUART2_BAUDRATE 460800
-//#define APP_LPUART2_BAUDRATE 921600
-//#define APP_LPUART2_BAUDRATE 1000000
-//#define APP_LPUART2_BAUDRATE 1500000
-//#define APP_LPUART2_BAUDRATE 2000000
-
-#ifndef APP_LPUART2_BAUDRATE
+// Valid rates e.g.
+// 9600 19200 38400 57600 115200 230400 460800 921600 1000000 1500000 2000000
 #define APP_LPUART2_BAUDRATE 115200
-#endif
 
 #define APP_TASK_STACK_SIZE (256)
 #ifndef LOCAL_EPT_ADDR
@@ -92,10 +80,9 @@ volatile bool a35_ready = true;
 volatile bool uart_ready = false;
 volatile bool task_stop_rq = false;
 volatile bool task_running = false;
+volatile bool trdc_set = false;
 
 static struct lpuart_io lpuart2;
-
-volatile bool trdc_set = false;
 
 static const uintptr_t RPMSG_NONBLOCKING = 0; // 0ms timeout == non-blocking
 
@@ -116,7 +103,8 @@ static inline uint32_t RGPIO_ReadPinNSE(RGPIO_Type *base, uint32_t pin)
 /*******************************************************************************
  * Code
  ******************************************************************************/
-void app_rpmsg_monitor(struct rpmsg_lite_instance *rpmsgHandle, bool ready, void *rpmsgMonitorParam)
+void app_rpmsg_monitor(struct rpmsg_lite_instance *rpmsgHandle, bool ready,
+                       void *rpmsgMonitorParam)
 {
     if (ready)
     {
@@ -141,12 +129,10 @@ void app_ap_online_state_change(bool ready, void *param)
 
 static TaskHandle_t app_task_handle = NULL;
 static TaskHandle_t lpuart2_task_handle = NULL;
-
 static struct rpmsg_lite_instance *volatile my_rpmsg = NULL;
-
 static struct rpmsg_lite_endpoint *volatile my_ept = NULL;
-static volatile rpmsg_queue_handle my_queue        = NULL;
-static volatile uint32_t my_rpmsg_remote_addr      = 0;
+static volatile rpmsg_queue_handle my_queue = NULL;
+static volatile uint32_t my_rpmsg_remote_addr = 0;
 
 void app_destroy_task(void)
 {
@@ -297,18 +283,24 @@ void app_task(void *param)
     /* Print the initial banner */
     PRINTF("\r\nCM33-elux\r\n");
 
-    my_rpmsg = rpmsg_lite_remote_init((void *)RPMSG_LITE_SHMEM_BASE, RPMSG_LITE_LINK_ID, RL_NO_FLAGS);
+    my_rpmsg = rpmsg_lite_remote_init((void *)RPMSG_LITE_SHMEM_BASE,
+                                      RPMSG_LITE_LINK_ID, RL_NO_FLAGS);
 
     rpmsg_lite_wait_for_link_up(my_rpmsg, RL_BLOCK);
 
     my_queue = rpmsg_queue_create(my_rpmsg);
-    my_ept   = rpmsg_lite_create_ept(my_rpmsg, LOCAL_EPT_ADDR, rpmsg_queue_rx_cb, my_queue);
-    (void)rpmsg_ns_announce(my_rpmsg, my_ept, RPMSG_LITE_NS_ANNOUNCE_STRING, RL_NS_CREATE);
+    my_ept = rpmsg_lite_create_ept(my_rpmsg, LOCAL_EPT_ADDR,
+                                   rpmsg_queue_rx_cb, my_queue);
+
+    (void)rpmsg_ns_announce(my_rpmsg, my_ept, RPMSG_LITE_NS_ANNOUNCE_STRING,
+                            RL_NS_CREATE);
 
     PRINTF("\r\nNameservice sent, ready for incoming messages...\r\n");
 
-    RxTxContext m2u = {.size = 0, .ndx = 0, .max_size = sizeof(buf_m2u), .buf = buf_m2u };
-    RxTxContext u2m = {.size = 0, .ndx = 0, .max_size = sizeof(buf_u2m), .buf = buf_u2m };
+    RxTxContext m2u = {.size = 0, .ndx = 0, .max_size = sizeof(buf_m2u),
+                       .buf = buf_m2u };
+    RxTxContext u2m = {.size = 0, .ndx = 0, .max_size = sizeof(buf_u2m),
+                       .buf = buf_u2m };
 
     for (uint32_t cnt = 0;; cnt++)
     {
@@ -343,17 +335,17 @@ void lpuart2_task(void *param)
     IOMUXC_SetPinConfig(IOMUXC_PTB2_LPUART2_TX,
                         IOMUXC_PCR_PE_MASK |
                         IOMUXC_PCR_PS_MASK);
-    
+
     IOMUXC_SetPinMux(IOMUXC_PTB3_LPUART2_RX, 0U);
     IOMUXC_SetPinConfig(IOMUXC_PTB3_LPUART2_RX,
                         IOMUXC_PCR_PE_MASK |
                         IOMUXC_PCR_PS_MASK);
-    
+
     IOMUXC_SetPinMux(IOMUXC_PTB4_LPUART2_CTS_B, 0U);
     IOMUXC_SetPinConfig(IOMUXC_PTB4_LPUART2_CTS_B,
                         IOMUXC_PCR_PE_MASK |
                         IOMUXC_PCR_PS_MASK);
-    
+
     IOMUXC_SetPinMux(IOMUXC_PTB5_LPUART2_RTS_B, 0U);
     IOMUXC_SetPinConfig(IOMUXC_PTB5_LPUART2_RTS_B,
                         IOMUXC_PCR_PE_MASK |
@@ -431,7 +423,8 @@ void app_create_task(void)
     PRINTF("\r\nCreate tasks\r\n");
 
     if (app_task_handle == NULL &&
-        xTaskCreate(app_task, "APP_TASK", APP_TASK_STACK_SIZE, NULL, tskIDLE_PRIORITY + 1, &app_task_handle) != pdPASS)
+        xTaskCreate(app_task, "APP_TASK", APP_TASK_STACK_SIZE, NULL,
+                    tskIDLE_PRIORITY + 1, &app_task_handle) != pdPASS)
     {
         PRINTF("\r\nFailed to create application task\r\n");
         for (;;)
@@ -439,7 +432,8 @@ void app_create_task(void)
     }
 
     if(lpuart2_task_handle == NULL &&
-        xTaskCreate(lpuart2_task, "LPUART2_TASK", APP_TASK_STACK_SIZE, NULL, tskIDLE_PRIORITY + 1, &lpuart2_task_handle) != pdPASS)
+        xTaskCreate(lpuart2_task, "LPUART2_TASK", APP_TASK_STACK_SIZE, NULL,
+                    tskIDLE_PRIORITY + 1, &lpuart2_task_handle) != pdPASS)
     {
         PRINTF("\r\nFailed to create lpuart2 task\r\n");
         for (;;)
