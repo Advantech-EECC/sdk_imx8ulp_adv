@@ -276,8 +276,13 @@ void app_subtask_uart_rx__simulate_high_throughput(RxTxContext *c)
     if (c->size > 0)
         return;
 
-    for (size_t i = 0; i < c->max_size; i++)
-        c->buf[i] = 'a' + (i % 26);
+    size_t i, j;
+    size_t cm27 = (c->max_size / 27) * 27;
+    for (i = 0; i < cm27; i += 27) {
+        for (j = 0; j < 26; j++)
+            c->buf[i + j] =  'a' + j;
+        c->buf[i + j] = '\n';
+    }
 
     c->size = c->max_size;
     c->ndx = 0;
