@@ -324,6 +324,10 @@ void app_task(void *param)
         app_subtask_mailbox_rx(&m2u);
         app_subtask_uart_tx(&m2u);
         app_subtask_uart_rx(&u2m);
+
+        if (!a35_ready)
+            continue;
+
         app_subtask_mailbox_tx(&u2m);
     }
 }
