@@ -25,6 +25,7 @@
 #include "fsl_fusion.h"
 #include "fsl_iomuxc.h"
 #include "lpuart_io.h"
+#include "version.h"
 
 //#define DEBUG_MBOX
 //#define DEBUG_UART
@@ -299,7 +300,7 @@ void app_subtask_uart_tx(RxTxContext *c)
 void app_task(void *param)
 {
     /* Print the initial banner */
-    PRINTF("\r\nCM33-iMX8ULP-adv\r\n");
+    PRINTF("\r\nCM33-iMX8ULP-adv " CM33_IMX8ULP_ADV_VER "\r\n");
 
     my_rpmsg = rpmsg_lite_remote_init((void *)RPMSG_LITE_SHMEM_BASE,
                                       RPMSG_LITE_LINK_ID, RL_NO_FLAGS);
